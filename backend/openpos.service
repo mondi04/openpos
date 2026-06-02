@@ -6,9 +6,9 @@ Wants=mosquitto.service
 [Service]
 Type=simple
 User=moritz
-WorkingDirectory=/home/moritz/openpos/backend
-EnvironmentFile=/home/moritz/openpos/backend/.env
-ExecStart=/usr/bin/python3 /home/moritz/openpos/backend/positioning_backend.py
+WorkingDirectory=/home/moritz/homeassistant/openpos/backend
+EnvironmentFile=/home/moritz/homeassistant/openpos/backend/.env
+ExecStart=/usr/bin/python3 /home/moritz/homeassistant/openpos/backend/positioning_backend.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

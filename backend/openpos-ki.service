@@ -6,9 +6,9 @@ Wants=openpos.service ollama.service
 [Service]
 Type=simple
 User=moritz
-WorkingDirectory=/home/moritz/openpos/backend
-EnvironmentFile=/home/moritz/openpos/backend/.env
-ExecStart=/usr/bin/python3 /home/moritz/openpos/backend/ki_controller.py
+WorkingDirectory=/home/moritz/homeassistant/openpos/backend
+EnvironmentFile=/home/moritz/homeassistant/openpos/backend/.env
+ExecStart=/usr/bin/python3 /home/moritz/homeassistant/openpos/backend/ki_controller.py
 Restart=on-failure
 RestartSec=15
 StandardOutput=journal
