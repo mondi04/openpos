@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenPositioning Backend
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=moritz
+WorkingDirectory=/home/moritz/openpos/backend
+EnvironmentFile=/home/moritz/openpos/backend/.env
+ExecStart=/usr/bin/python3 /home/moritz/openpos/backend/positioning_backend.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
