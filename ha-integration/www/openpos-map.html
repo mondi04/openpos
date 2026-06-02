@@ -5,12 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OpenPositioning</title>
 
-  <!--
-    MQTT über WebSocket:
-    Der Browser verbindet sich direkt mit Mosquitto (Port 9001)
-    und empfängt Positionsdaten in Echtzeit.
-    Bibliothek: Paho MQTT JavaScript Client (von Eclipse)
-  -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
 
   <style>
@@ -33,7 +27,6 @@
       text-transform: uppercase;
     }
 
-    /* ── Statusleiste ── */
     .status-bar {
       display: flex;
       align-items: center;
@@ -44,17 +37,15 @@
     }
 
     .status-dot {
-      width: 8px;
-      height: 8px;
+      width: 8px; height: 8px;
       border-radius: 50%;
       background: #444;
       transition: background 0.3s;
     }
-
     .status-dot.connected    { background: #1D9E75; box-shadow: 0 0 6px #1D9E75aa; }
     .status-dot.disconnected { background: #E24B4A; }
 
-    /* ── Räume nebeneinander ── */
+    /* Räume nebeneinander — Schlafzimmer links, Wohnzimmer rechts */
     .rooms {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -78,9 +69,8 @@
       margin-bottom: 10px;
     }
 
-    /* ── Canvas (Raumplan) ── */
     .canvas-wrap {
-      position: relative;   /* wichtig: damit der Marker absolut positioniert werden kann */
+      position: relative;
       width: 100%;
     }
 
@@ -91,22 +81,18 @@
       border-radius: 8px;
     }
 
-    /* ── Positions-Marker (roter Punkt) ── */
     .pos-marker {
-      position: absolute;      /* relativ zum canvas-wrap */
-      width: 16px;
-      height: 16px;
+      position: absolute;
+      width: 16px; height: 16px;
       border-radius: 50%;
       background: #E24B4A;
       border: 2px solid #fff;
-      transform: translate(-50%, -50%);  /* Mittelpunkt des Kreises auf die Koordinate */
-      pointer-events: none;              /* Klicks gehen durch den Marker hindurch */
-      transition: all 0.5s ease;        /* sanfte Bewegung zwischen Positionen */
-      box-shadow: 0 0 0 4px rgba(226, 75, 74, 0.3);
-      display: none;           /* versteckt bis erste Daten ankommen */
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: all 0.5s ease;
+      box-shadow: 0 0 0 4px rgba(226,75,74,0.3);
+      display: none;
     }
-
-    /* Pulsierender Ring um den Marker */
     .pos-marker::after {
       content: '';
       position: absolute;
@@ -116,13 +102,11 @@
       border: 1.5px solid #E24B4A;
       animation: pulse 2s infinite;
     }
-
     @keyframes pulse {
       0%   { opacity: 0.8; transform: scale(1); }
       100% { opacity: 0;   transform: scale(1.8); }
     }
 
-    /* ── Zone-Anzeige unter dem Canvas ── */
     .zone-label {
       margin-top: 8px;
       min-height: 24px;
@@ -132,44 +116,28 @@
       align-items: center;
       gap: 6px;
     }
-
     .zone-dot {
-      width: 8px;
-      height: 8px;
+      width: 8px; height: 8px;
       border-radius: 50%;
       flex-shrink: 0;
     }
 
-    /* ── Kennzahlen-Leiste ── */
     .stats {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 10px;
       margin-bottom: 16px;
     }
-
     .stat {
       background: #1a1d24;
       border: 1px solid #2a2d36;
       border-radius: 8px;
       padding: 10px 14px;
     }
-
-    .stat-label {
-      font-size: 11px;
-      color: #6a7080;
-      margin-bottom: 4px;
-    }
-
-    .stat-value {
-      font-size: 20px;
-      font-weight: 500;
-      color: #e0e0e0;
-    }
-
+    .stat-label  { font-size: 11px; color: #6a7080; margin-bottom: 4px; }
+    .stat-value  { font-size: 20px; font-weight: 500; color: #e0e0e0; }
     .stat-value.small { font-size: 14px; }
 
-    /* ── Legende ── */
     .legend {
       display: flex;
       flex-wrap: wrap;
@@ -177,21 +145,9 @@
       font-size: 11px;
       color: #6a7080;
     }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-sq   { width: 10px; height: 10px; border-radius: 2px; opacity: 0.8; }
 
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-
-    .legend-sq {
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
-      opacity: 0.8;
-    }
-
-    /* ── Letztes Update ── */
     .last-update {
       font-size: 11px;
       color: #4a5060;
@@ -202,120 +158,290 @@
 </head>
 <body>
 
-  <h1>OpenPositioning — Live</h1>
+<h1>OpenPositioning — Live</h1>
 
-  <!-- Statusleiste -->
-  <div class="status-bar">
-    <div class="status-dot disconnected" id="statusDot"></div>
-    <span id="statusText">Verbinde mit MQTT...</span>
-  </div>
+<div class="status-bar">
+  <div class="status-dot disconnected" id="statusDot"></div>
+  <span id="statusText">Verbinde mit MQTT...</span>
+</div>
 
-  <!-- Räume -->
-  <div class="rooms">
+<div class="rooms">
 
-    <!-- Schlafzimmer -->
-    <div class="room-card">
-      <div class="room-title">Schlafzimmer</div>
-      <div class="canvas-wrap" id="wrap-s">
-        <canvas id="canvas-s" width="280" height="200"
-          aria-label="Grundriss Schlafzimmer mit Zonen"></canvas>
-        <div class="pos-marker" id="marker-s"></div>
-      </div>
-      <div class="zone-label" id="zone-s">
-        <span class="zone-dot" style="background:#444"></span>
-        <span>Keine Position</span>
-      </div>
+  <!-- Schlafzimmer -->
+  <div class="room-card">
+    <div class="room-title">Schlafzimmer</div>
+    <div class="canvas-wrap" id="wrap-s">
+      <canvas id="canvas-s" width="310" height="300"
+        aria-label="Grundriss Schlafzimmer"></canvas>
+      <div class="pos-marker" id="marker-s"></div>
     </div>
-
-    <!-- Wohnzimmer -->
-    <div class="room-card">
-      <div class="room-title">Wohnzimmer</div>
-      <div class="canvas-wrap" id="wrap-w">
-        <canvas id="canvas-w" width="280" height="200"
-          aria-label="Grundriss Wohnzimmer mit Zonen"></canvas>
-        <div class="pos-marker" id="marker-w"></div>
-      </div>
-      <div class="zone-label" id="zone-w">
-        <span class="zone-dot" style="background:#444"></span>
-        <span>Keine Position</span>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Kennzahlen -->
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-label">Raum</div>
-      <div class="stat-value small" id="st-room">—</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Zone</div>
-      <div class="stat-value small" id="st-zone">—</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Konfidenz</div>
-      <div class="stat-value" id="st-conf">—</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Methode</div>
-      <div class="stat-value small" id="st-method">—</div>
+    <div class="zone-label" id="zone-s">
+      <span class="zone-dot" style="background:#444"></span>
+      <span>Keine Position</span>
     </div>
   </div>
 
-  <!-- Legende -->
-  <div class="legend" id="legend"></div>
+  <!-- Wohnzimmer -->
+  <div class="room-card">
+    <div class="room-title">Wohnzimmer</div>
+    <div class="canvas-wrap" id="wrap-w">
+      <canvas id="canvas-w" width="310" height="300"
+        aria-label="Grundriss Wohnzimmer"></canvas>
+      <div class="pos-marker" id="marker-w"></div>
+    </div>
+    <div class="zone-label" id="zone-w">
+      <span class="zone-dot" style="background:#444"></span>
+      <span>Keine Position</span>
+    </div>
+  </div>
 
-  <div class="last-update" id="lastUpdate"></div>
+</div>
+
+<!-- Kennzahlen -->
+<div class="stats">
+  <div class="stat"><div class="stat-label">Raum</div><div class="stat-value small" id="st-room">—</div></div>
+  <div class="stat"><div class="stat-label">Zone</div><div class="stat-value small" id="st-zone">—</div></div>
+  <div class="stat"><div class="stat-label">Konfidenz</div><div class="stat-value" id="st-conf">—</div></div>
+  <div class="stat"><div class="stat-label">Methode</div><div class="stat-value small" id="st-method">—</div></div>
+</div>
+
+<div class="legend" id="legend"></div>
+<div class="last-update" id="lastUpdate"></div>
 
 <script>
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  KONFIGURATION
-//  Passe die IP-Adresse deines Raspi an!
-// ═══════════════════════════════════════════════════════
-const MQTT_HOST  = window.location.hostname; // automatisch: selbe IP wie HA
-const MQTT_PORT  = 9001;                     // WebSocket-Port von Mosquitto
+// ═══════════════════════════════════════════════
+const MQTT_HOST  = window.location.hostname;
+const MQTT_PORT  = 9001;
 const MQTT_TOPIC = 'openpos/position/result';
 
-// Raumabmessungen in Metern (anpassen an deine echten Räume!)
-const ROOM_WIDTH_M  = 5;  // Breite in Metern
-const ROOM_HEIGHT_M = 4;  // Höhe in Metern
+// Echte Raummaße in Metern
+const ROOM_W = 5;
+const ROOM_H = 4;
 
-// ═══════════════════════════════════════════════════════
-//  ZONEN-DEFINITION
-//  x, y, w, h = relative Werte (0.0 - 1.0) des Canvas
-//  Also: x=0.05 bedeutet 5% vom linken Rand
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ZONEN-DEFINITION (relative Koordinaten 0–1)
+//  Exakt abgeleitet aus dem SVG-Grundriss.
+//
+//  SVG-Koordinatensystem Schlafzimmer: x 350–660, y 25–325
+//  Canvas-Größe: 310 × 300 px  → 1:1 mit SVG-Einheiten
+//
+//  SVG-Koordinatensystem Wohnzimmer: x 20–330, y 25–325
+//  Canvas-Größe: 310 × 300 px  → 1:1 mit SVG-Einheiten
+// ═══════════════════════════════════════════════
+
+// Hilfsfunktion: SVG-Koordinaten (relativ zum Raumursprung) → 0..1
+// Schlafzimmer-Ursprung: x0=350, y0=25, W=310, H=300
+function sRel(x, y, w, h) {
+  return { x: x/310, y: y/300, w: w/310, h: h/300 };
+}
+// Wohnzimmer-Ursprung: x0=20, y0=25, W=310, H=300
+// (gleiche Funktion, Koordinaten bereits relativ übergeben)
+
 const ROOMS = {
+
   schlafzimmer: {
     canvasId: 'canvas-s',
     wrapId:   'wrap-s',
     markerId: 'marker-s',
     zoneElId: 'zone-s',
+
+    // Möbelzonen (für Hit-Test & Anzeige)
     zones: [
-      { id:'bett',        label:'Bett',            x:0.05, y:0.05, w:0.45, h:0.42, color:'#378ADD' },
-      { id:'schreibtisch',label:'Schreibtisch',     x:0.55, y:0.05, w:0.40, h:0.35, color:'#1D9E75' },
-      { id:'tuer',        label:'Eingang / Tür',    x:0.05, y:0.75, w:0.25, h:0.22, color:'#EF9F27' },
-      { id:'fenster',     label:'Fenster-Bereich',  x:0.35, y:0.62, w:0.60, h:0.18, color:'#9F77DD' },
-    ]
+      // Kleiner Schrank  SVG: x=355–407, y=30–110  → relativ: 5,5,52,80
+      { id:'kleiner_schrank', label:'Kleiner Schrank',  color:'#9F77DD', ...sRel(5, 5, 52, 80) },
+      // Bett             SVG: x=440–655, y=30–135  → relativ: 90,5,215,105
+      { id:'bett',            label:'Bett',             color:'#D4537E', ...sRel(90, 5, 215, 105) },
+      // Schreibtisch 1 (U-Form, Bounding-Box) SVG: x=548–655, y=143–325 → relativ: 198,118,107,182
+      { id:'schreibtisch1',   label:'Schreibtisch 1',   color:'#EF9F27', ...sRel(198, 118, 107, 182) },
+    ],
+
+    // Zeichenanweisungen (werden in drawRoom verarbeitet)
+    drawExtra: function(ctx, W, H) {
+      // ── Wanddurchbruch (links, gestrichelt) ──
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = '#ffffff22';
+      ctx.fillStyle   = '#ffffff08';
+      ctx.fillRect(0, 93, 8, 114);
+      ctx.strokeRect(0, 93, 8, 114);
+      ctx.restore();
+
+      // ── Kleiner Schrank ──
+      drawZoneBox(ctx, W, H, sRel(5, 5, 52, 80), '#9F77DD', 'Kleiner\nSchrank');
+
+      // ── Bett ──
+      drawZoneBox(ctx, W, H, sRel(90, 5, 215, 105), '#D4537E', 'Bett');
+
+      // ── Schreibtisch 1 — U-Form (Öffnung nach links/Raummitte) ──
+      // Oberer Schenkel:  SVG x=548–655, y=143–185  → rel: 198,118,107,42
+      drawZoneBox(ctx, W, H, sRel(198, 118, 107, 42),  '#EF9F27', null);
+      // Unterer Schenkel: SVG x=548–655, y=283–325  → rel: 198,258,107,42
+      drawZoneBox(ctx, W, H, sRel(198, 258, 107, 42),  '#EF9F27', null);
+      // Rechter Balken:   SVG x=607–655, y=143–325  → rel: 257,118,48,182
+      drawZoneBox(ctx, W, H, sRel(257, 118, 48, 182),  '#EF9F27', null);
+      // Label mittig im U
+      ctx.fillStyle = '#EF9F27cc';
+      ctx.font      = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      const ux = (sRel(198,118,107,182).x + sRel(198,118,107,182).w/2) * W;
+      const uy = (sRel(198,118,107,182).y + sRel(198,118,107,182).h/2) * H;
+      ctx.fillText('Schreibtisch 1', ux - 10, uy);
+      ctx.textAlign = 'left';
+
+      // ── Fenster 1 (untere Wand, x=440–655) → rel x=90..305 ──
+      drawFenster(ctx, W, H, 90/310, 305/310, 1.0, '#85B7EB', 'Fenster 1');
+
+      // ── ESP32-Nodes ──
+      drawNode(ctx, W, H, 13/310, 8/300,   'S1');
+      drawNode(ctx, W, H, 298/310, 8/300,  'S2');
+      drawNode(ctx, W, H, 298/310, 290/300,'S3');
+    }
   },
+
   wohnzimmer: {
     canvasId: 'canvas-w',
     wrapId:   'wrap-w',
     markerId: 'marker-w',
     zoneElId: 'zone-w',
+
     zones: [
-      { id:'couch',   label:'Couch',           x:0.05, y:0.05, w:0.55, h:0.45, color:'#1D9E75' },
-      { id:'tuer',    label:'Eingang / Tür',   x:0.70, y:0.05, w:0.25, h:0.22, color:'#EF9F27' },
-      { id:'fenster', label:'Fenster-Bereich', x:0.05, y:0.60, w:0.90, h:0.18, color:'#9F77DD' },
-    ]
+      // Kleiderschrank begehbar  SVG: x=25–255, y=30–110  → relativ: 5,5,230,80
+      { id:'kleiderschrank', label:'Kleiderschrank begehbar', color:'#378ADD', ...sRel(5, 5, 230, 80) },
+      // Couch  SVG: x=25–73, y=155–275  → relativ: 5,130,48,120
+      { id:'couch',          label:'Couch',                   color:'#1D9E75', ...sRel(5, 130, 48, 120) },
+      // Schreibtisch 2  SVG: x=210–325, y=230–320  → relativ: 190,205,115,90
+      { id:'schreibtisch2',  label:'Schreibtisch 2',          color:'#EF9F27', ...sRel(190, 205, 115, 90) },
+    ],
+
+    drawExtra: function(ctx, W, H) {
+      // ── Wanddurchbruch (rechts, gestrichelt) ──
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = '#ffffff22';
+      ctx.fillStyle   = '#ffffff08';
+      ctx.fillRect(W - 8, 93, 8, 114);
+      ctx.strokeRect(W - 8, 93, 8, 114);
+      ctx.restore();
+
+      // ── Tür (oben rechts, SVG x=258–298, y=25) → rel x=238,0,40 ──
+      drawTuer(ctx, W, H, 238/310, 278/310);
+
+      // ── Kleiderschrank ──
+      drawZoneBox(ctx, W, H, sRel(5, 5, 230, 80), '#378ADD', 'Kleiderschrank begehbar');
+
+      // ── Couch ──
+      drawZoneBox(ctx, W, H, sRel(5, 130, 48, 120), '#1D9E75', null);
+      ctx.save();
+      ctx.fillStyle = '#1D9E75cc';
+      ctx.font      = '9px sans-serif';
+      ctx.translate(sRel(5,130,48,120).x*W + 24, sRel(5,130,48,120).y*H + 60);
+      ctx.rotate(-Math.PI/2);
+      ctx.textAlign = 'center';
+      ctx.fillText('Couch', 0, 0);
+      ctx.restore();
+
+      // ── Schreibtisch 2 ──
+      drawZoneBox(ctx, W, H, sRel(190, 205, 115, 90), '#EF9F27', 'Schreibtisch 2');
+
+      // ── Fenster 2 (untere Wand, SVG x=70–200) → rel x=50..180 ──
+      drawFenster(ctx, W, H, 50/310, 180/310, 1.0, '#85B7EB', 'Fenster 2');
+
+      // ── ESP32-Nodes ──
+      drawNode(ctx, W, H, 13/310,  8/300,   'W1');
+      drawNode(ctx, W, H, 297/310, 8/300,   'W2');
+      drawNode(ctx, W, H, 13/310,  290/300, 'W3');
+    }
   }
 };
 
-// ═══════════════════════════════════════════════════════
-//  RÄUME ZEICHNEN
-//  Wird einmal beim Laden aufgerufen
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ZEICHENHILFEN
+// ═══════════════════════════════════════════════
+
+function drawZoneBox(ctx, W, H, z, color, label) {
+  const x = z.x*W, y = z.y*H, w = z.w*W, h = z.h*H;
+  ctx.save();
+  ctx.fillStyle   = color + '22';
+  ctx.strokeStyle = color + '99';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 3);
+  ctx.fill();
+  ctx.stroke();
+  if (label) {
+    ctx.fillStyle = color + 'cc';
+    ctx.font      = 'bold 9px sans-serif';
+    ctx.fillText(label, x + 5, y + 13);
+  }
+  ctx.restore();
+}
+
+function drawFenster(ctx, W, H, xStart, xEnd, yRel, color, label) {
+  const y = yRel * H;
+  ctx.save();
+  ctx.setLineDash([5, 3]);
+  ctx.strokeStyle = color;
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.moveTo(xStart * W, y);
+  ctx.lineTo(xEnd * W, y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = color + 'cc';
+  ctx.font      = '8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, ((xStart + xEnd) / 2) * W, y - 4);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawTuer(ctx, W, H, xStart, xEnd) {
+  // Öffnung in Oberwand
+  ctx.save();
+  ctx.fillStyle = '#0f1117';
+  ctx.fillRect(xStart * W, 0, (xEnd - xStart) * W, 4);
+  // Türblatt
+  ctx.strokeStyle = '#ffffff55';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(xStart * W, 0);
+  ctx.lineTo(xStart * W, 35);
+  ctx.stroke();
+  // Bogen
+  ctx.setLineDash([3, 2]);
+  ctx.strokeStyle = '#ffffff33';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const r = (xEnd - xStart) * W;
+  ctx.arc(xStart * W, 0, r, 0, Math.PI / 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ffffff33';
+  ctx.font      = '8px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Tür', ((xStart + xEnd) / 2) * W, 22);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+function drawNode(ctx, W, H, xRel, yRel, label) {
+  const x = xRel * W, y = yRel * H;
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fillStyle = '#185FA5';
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font      = 'bold 6px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x, y + 2.5);
+  ctx.textAlign = 'left';
+}
+
+// ═══════════════════════════════════════════════
+//  RAUM ZEICHNEN
+// ═══════════════════════════════════════════════
 function drawRoom(roomKey) {
   const r   = ROOMS[roomKey];
   const c   = document.getElementById(r.canvasId);
@@ -327,8 +453,8 @@ function drawRoom(roomKey) {
   ctx.fillStyle = '#0f1117';
   ctx.fillRect(0, 0, W, H);
 
-  // Gitterlinien (helfen beim Training die Position einzuschätzen)
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  // Gitter
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
   ctx.lineWidth = 0.5;
   for (let x = 0; x <= W; x += W / 5) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
@@ -337,81 +463,42 @@ function drawRoom(roomKey) {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
-  // Meter-Beschriftung an den Achsen
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  ctx.font = '9px sans-serif';
-  for (let m = 1; m < ROOM_WIDTH_M; m++) {
-    ctx.fillText(m+'m', (m / ROOM_WIDTH_M) * W - 6, H - 3);
+  // Außenwände
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth   = 2.5;
+  ctx.strokeRect(0, 0, W, H);
+
+  // Meter-Beschriftung
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.font      = '9px sans-serif';
+  for (let m = 1; m < ROOM_W; m++) {
+    ctx.fillText(m + 'm', (m / ROOM_W) * W - 6, H - 3);
   }
 
-  // Zonen zeichnen
-  r.zones.forEach(z => {
-    const zx = z.x * W, zy = z.y * H;
-    const zw = z.w * W, zh = z.h * H;
-
-    // Gefüllte Zone (halbtransparent)
-    ctx.fillStyle = z.color + '22';
-    ctx.beginPath();
-    ctx.roundRect(zx, zy, zw, zh, 5);
-    ctx.fill();
-
-    // Rahmen der Zone
-    ctx.strokeStyle = z.color + '88';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Zonen-Beschriftung
-    ctx.fillStyle = z.color + 'cc';
-    ctx.font = '9px sans-serif';
-    ctx.fillText(z.label, zx + 5, zy + 13);
-  });
-
-  // ESP32-Nodes als blaue Punkte einzeichnen
-  // Positionen: grob die Ecken + Mitte des Raumes
-  const nodePos = [
-    {x: 0.05, y: 0.05},  // Node 1: oben links
-    {x: 0.95, y: 0.05},  // Node 2: oben rechts
-    {x: 0.50, y: 0.95},  // Node 3: unten mitte
-  ];
-  nodePos.forEach((p, i) => {
-    ctx.beginPath();
-    ctx.arc(p.x * W, p.y * H, 5, 0, Math.PI * 2);
-    ctx.fillStyle = '#185FA5';
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 6px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(roomKey[0].toUpperCase() + (i + 1), p.x * W, p.y * H + 2.5);
-    ctx.textAlign = 'left';
-  });
+  // Raumspezifische Zeichnungen
+  r.drawExtra(ctx, W, H);
 }
 
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  POSITION AKTUALISIEREN
-//  Wird aufgerufen wenn neue MQTT-Daten ankommen
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 function updatePosition(data) {
   const roomKey = data.room.toLowerCase();
   const r = ROOMS[roomKey];
   if (!r) return;
 
-  // Koordinaten (Meter) → relative Position (0.0 - 1.0)
-  const xRel = Math.min(Math.max(data.x / ROOM_WIDTH_M,  0), 1);
-  const yRel = Math.min(Math.max(data.y / ROOM_HEIGHT_M, 0), 1);
+  const xRel = Math.min(Math.max(data.x / ROOM_W, 0), 1);
+  const yRel = Math.min(Math.max(data.y / ROOM_H, 0), 1);
 
-  // Canvas-Größe im Browser ermitteln (kann durch CSS skaliert sein)
   const canvas = document.getElementById(r.canvasId);
   const rect   = canvas.getBoundingClientRect();
 
-  // Marker positionieren
-  // Das wrap-div hat position:relative, der Marker position:absolute
-  // left/top = Pixel-Position innerhalb des wrap-divs
   const marker = document.getElementById(r.markerId);
   marker.style.display = 'block';
-  marker.style.left = (xRel * rect.width)  + 'px';
-  marker.style.top  = (yRel * rect.height) + 'px';
+  marker.style.left    = (xRel * rect.width)  + 'px';
+  marker.style.top     = (yRel * rect.height) + 'px';
 
-  // Anderen Raum-Marker verstecken
+  // Anderen Raum-Marker ausblenden
   Object.keys(ROOMS).forEach(k => {
     if (k !== roomKey) {
       document.getElementById(ROOMS[k].markerId).style.display = 'none';
@@ -425,63 +512,49 @@ function updatePosition(data) {
     xRel >= z.x && xRel <= z.x + z.w &&
     yRel >= z.y && yRel <= z.y + z.h
   );
-  const zoneName  = zone ? zone.label  : 'Übergangsbereich';
-  const zoneColor = zone ? zone.color  : '#666';
+  const zoneName  = zone ? zone.label : 'Übergangsbereich';
+  const zoneColor = zone ? zone.color : '#666';
 
-  // Zone-Label aktualisieren
   document.getElementById(r.zoneElId).innerHTML =
     `<span class="zone-dot" style="background:${zoneColor}"></span><span>${zoneName}</span>`;
 
-  // Kennzahlen aktualisieren
   document.getElementById('st-room').textContent   = data.room;
   document.getElementById('st-zone').textContent   = zoneName;
   document.getElementById('st-conf').textContent   = Math.round(data.confidence * 100) + '%';
   document.getElementById('st-method').textContent = data.method || 'knn';
 
-  // Zeitstempel
-  const now = new Date();
   document.getElementById('lastUpdate').textContent =
-    'Letztes Update: ' + now.toLocaleTimeString('de-DE');
+    'Letztes Update: ' + new Date().toLocaleTimeString('de-DE');
 }
 
-// ═══════════════════════════════════════════════════════
-//  MQTT VERBINDUNG
-//  Verbindet sich mit Mosquitto über WebSocket (Port 9001)
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  MQTT
+// ═══════════════════════════════════════════════
 function connectMQTT() {
-  // Client-ID muss eindeutig sein → zufällige ID
   const clientId = 'openpos-ui-' + Math.random().toString(16).substr(2, 6);
+  const client   = new Paho.MQTT.Client(MQTT_HOST, MQTT_PORT, clientId);
 
-  // Paho MQTT Client erstellen
-  const client = new Paho.MQTT.Client(MQTT_HOST, MQTT_PORT, clientId);
-
-  // Was passiert wenn die Verbindung abbricht
-  client.onConnectionLost = function(resp) {
-    document.getElementById('statusDot').className  = 'status-dot disconnected';
+  client.onConnectionLost = function() {
+    document.getElementById('statusDot').className   = 'status-dot disconnected';
     document.getElementById('statusText').textContent = 'Verbindung verloren — versuche neu...';
-    // Nach 5 Sekunden erneut verbinden
     setTimeout(connectMQTT, 5000);
   };
 
-  // Was passiert wenn eine Nachricht ankommt
   client.onMessageArrived = function(msg) {
     try {
-      const data = JSON.parse(msg.payloadString);
-      updatePosition(data);
+      updatePosition(JSON.parse(msg.payloadString));
     } catch(e) {
       console.error('MQTT Parse-Fehler:', e);
     }
   };
 
-  // Verbindung aufbauen
   client.connect({
     onSuccess: function() {
       document.getElementById('statusDot').className   = 'status-dot connected';
       document.getElementById('statusText').textContent = 'Verbunden mit MQTT';
-      // Topic abonnieren
       client.subscribe(MQTT_TOPIC);
     },
-    onFailure: function(err) {
+    onFailure: function() {
       document.getElementById('statusDot').className   = 'status-dot disconnected';
       document.getElementById('statusText').textContent = 'Verbindung fehlgeschlagen — Retry in 5s';
       setTimeout(connectMQTT, 5000);
@@ -490,9 +563,9 @@ function connectMQTT() {
   });
 }
 
-// ═══════════════════════════════════════════════════════
-//  LEGENDE AUFBAUEN
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  LEGENDE
+// ═══════════════════════════════════════════════
 function buildLegend() {
   const el   = document.getElementById('legend');
   const seen = {};
@@ -510,18 +583,19 @@ function buildLegend() {
   });
   el.innerHTML +=
     `<span class="legend-item">
-      <span class="legend-sq" style="background:#185FA5; border-radius:50%"></span>
-      ESP32-Node
+      <span class="legend-sq" style="background:#85B7EB"></span>Fenster
     </span>
     <span class="legend-item">
-      <span class="legend-sq" style="background:#E24B4A; border-radius:50%"></span>
-      Position
+      <span class="legend-sq" style="background:#185FA5; border-radius:50%"></span>ESP32-Node
+    </span>
+    <span class="legend-item">
+      <span class="legend-sq" style="background:#E24B4A; border-radius:50%"></span>Position
     </span>`;
 }
 
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  START
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 Object.keys(ROOMS).forEach(drawRoom);
 buildLegend();
 connectMQTT();
