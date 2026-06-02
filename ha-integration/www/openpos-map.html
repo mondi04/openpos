@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenPositioning</title>
+
+  <!--
+    MQTT über WebSocket:
+    Der Browser verbindet sich direkt mit Mosquitto (Port 9001)
+    und empfängt Positionsdaten in Echtzeit.
+    Bibliothek: Paho MQTT JavaScript Client (von Eclipse)
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #111318;
+      color: #e0e0e0;
+      padding: 16px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 500;
+      color: #9aa0b0;
+      margin-bottom: 16px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* ── Statusleiste ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #9aa0b0;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+      transition: background 0.3s;
+    }
+
+    .status-dot.connected    { background: #1D9E75; box-shadow: 0 0 6px #1D9E75aa; }
+    .status-dot.disconnected { background: #E24B4A; }
+
+    /* ── Räume nebeneinander ── */
+    .rooms {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .room-card {
+      background: #1a1d24;
+      border: 1px solid #2a2d36;
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .room-title {
+      font-size: 11px;
+      font-weight: 500;
+      color: #6a7080;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+
+    /* ── Canvas (Raumplan) ── */
+    .canvas-wrap {
+      position: relative;   /* wichtig: damit der Marker absolut positioniert werden kann */
+      width: 100%;
+    }
+
+    canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 8px;
+    }
+
+    /* ── Positions-Marker (roter Punkt) ── */
+    .pos-marker {
+      position: absolute;      /* relativ zum canvas-wrap */
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #E24B4A;
+      border: 2px solid #fff;
+      transform: translate(-50%, -50%);  /* Mittelpunkt des Kreises auf die Koordinate */
+      pointer-events: none;              /* Klicks gehen durch den Marker hindurch */
+      transition: all 0.5s ease;        /* sanfte Bewegung zwischen Positionen */
+      box-shadow: 0 0 0 4px rgba(226, 75, 74, 0.3);
+      display: none;           /* versteckt bis erste Daten ankommen */
+    }
+
+    /* Pulsierender Ring um den Marker */
+    .pos-marker::after {
+      content: '';
+      position: absolute;
+      top: -6px; left: -6px;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      border: 1.5px solid #E24B4A;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%   { opacity: 0.8; transform: scale(1); }
+      100% { opacity: 0;   transform: scale(1.8); }
+    }
+
+    /* ── Zone-Anzeige unter dem Canvas ── */
+    .zone-label {
+      margin-top: 8px;
+      min-height: 24px;
+      font-size: 12px;
+      color: #9aa0b0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .zone-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* ── Kennzahlen-Leiste ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat {
+      background: #1a1d24;
+      border: 1px solid #2a2d36;
+      border-radius: 8px;
+      padding: 10px 14px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #6a7080;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 500;
+      color: #e0e0e0;
+    }
+
+    .stat-value.small { font-size: 14px; }
+
+    /* ── Legende ── */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 11px;
+      color: #6a7080;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .legend-sq {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      opacity: 0.8;
+    }
+
+    /* ── Letztes Update ── */
+    .last-update {
+      font-size: 11px;
+      color: #4a5060;
+      margin-top: 14px;
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>OpenPositioning — Live</h1>
+
+  <!-- Statusleiste -->
+  <div class="status-bar">
+    <div class="status-dot disconnected" id="statusDot"></div>
+    <span id="statusText">Verbinde mit MQTT...</span>
+  </div>
+
+  <!-- Räume -->
+  <div class="rooms">
+
+    <!-- Schlafzimmer -->
+    <div class="room-card">
+      <div class="room-title">Schlafzimmer</div>
+      <div class="canvas-wrap" id="wrap-s">
+        <canvas id="canvas-s" width="280" height="200"
+          aria-label="Grundriss Schlafzimmer mit Zonen"></canvas>
+        <div class="pos-marker" id="marker-s"></div>
+      </div>
+      <div class="zone-label" id="zone-s">
+        <span class="zone-dot" style="background:#444"></span>
+        <span>Keine Position</span>
+      </div>
+    </div>
+
+    <!-- Wohnzimmer -->
+    <div class="room-card">
+      <div class="room-title">Wohnzimmer</div>
+      <div class="canvas-wrap" id="wrap-w">
+        <canvas id="canvas-w" width="280" height="200"
+          aria-label="Grundriss Wohnzimmer mit Zonen"></canvas>
+        <div class="pos-marker" id="marker-w"></div>
+      </div>
+      <div class="zone-label" id="zone-w">
+        <span class="zone-dot" style="background:#444"></span>
+        <span>Keine Position</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Kennzahlen -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Raum</div>
+      <div class="stat-value small" id="st-room">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Zone</div>
+      <div class="stat-value small" id="st-zone">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Konfidenz</div>
+      <div class="stat-value" id="st-conf">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Methode</div>
+      <div class="stat-value small" id="st-method">—</div>
+    </div>
+  </div>
+
+  <!-- Legende -->
+  <div class="legend" id="legend"></div>
+
+  <div class="last-update" id="lastUpdate"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  KONFIGURATION
+//  Passe die IP-Adresse deines Raspi an!
+// ═══════════════════════════════════════════════════════
+const MQTT_HOST  = window.location.hostname; // automatisch: selbe IP wie HA
+const MQTT_PORT  = 9001;                     // WebSocket-Port von Mosquitto
+const MQTT_TOPIC = 'openpos/position/result';
+
+// Raumabmessungen in Metern (anpassen an deine echten Räume!)
+const ROOM_WIDTH_M  = 5;  // Breite in Metern
+const ROOM_HEIGHT_M = 4;  // Höhe in Metern
+
+// ═══════════════════════════════════════════════════════
+//  ZONEN-DEFINITION
+//  x, y, w, h = relative Werte (0.0 - 1.0) des Canvas
+//  Also: x=0.05 bedeutet 5% vom linken Rand
+// ═══════════════════════════════════════════════════════
+const ROOMS = {
+  schlafzimmer: {
+    canvasId: 'canvas-s',
+    wrapId:   'wrap-s',
+    markerId: 'marker-s',
+    zoneElId: 'zone-s',
+    zones: [
+      { id:'bett',        label:'Bett',            x:0.05, y:0.05, w:0.45, h:0.42, color:'#378ADD' },
+      { id:'schreibtisch',label:'Schreibtisch',     x:0.55, y:0.05, w:0.40, h:0.35, color:'#1D9E75' },
+      { id:'tuer',        label:'Eingang / Tür',    x:0.05, y:0.75, w:0.25, h:0.22, color:'#EF9F27' },
+      { id:'fenster',     label:'Fenster-Bereich',  x:0.35, y:0.62, w:0.60, h:0.18, color:'#9F77DD' },
+    ]
+  },
+  wohnzimmer: {
+    canvasId: 'canvas-w',
+    wrapId:   'wrap-w',
+    markerId: 'marker-w',
+    zoneElId: 'zone-w',
+    zones: [
+      { id:'couch',   label:'Couch',           x:0.05, y:0.05, w:0.55, h:0.45, color:'#1D9E75' },
+      { id:'tuer',    label:'Eingang / Tür',   x:0.70, y:0.05, w:0.25, h:0.22, color:'#EF9F27' },
+      { id:'fenster', label:'Fenster-Bereich', x:0.05, y:0.60, w:0.90, h:0.18, color:'#9F77DD' },
+    ]
+  }
+};
+
+// ═══════════════════════════════════════════════════════
+//  RÄUME ZEICHNEN
+//  Wird einmal beim Laden aufgerufen
+// ═══════════════════════════════════════════════════════
+function drawRoom(roomKey) {
+  const r   = ROOMS[roomKey];
+  const c   = document.getElementById(r.canvasId);
+  const ctx = c.getContext('2d');
+  const W   = c.width;
+  const H   = c.height;
+
+  // Hintergrund
+  ctx.fillStyle = '#0f1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // Gitterlinien (helfen beim Training die Position einzuschätzen)
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x <= W; x += W / 5) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y <= H; y += H / 4) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Meter-Beschriftung an den Achsen
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.font = '9px sans-serif';
+  for (let m = 1; m < ROOM_WIDTH_M; m++) {
+    ctx.fillText(m+'m', (m / ROOM_WIDTH_M) * W - 6, H - 3);
+  }
+
+  // Zonen zeichnen
+  r.zones.forEach(z => {
+    const zx = z.x * W, zy = z.y * H;
+    const zw = z.w * W, zh = z.h * H;
+
+    // Gefüllte Zone (halbtransparent)
+    ctx.fillStyle = z.color + '22';
+    ctx.beginPath();
+    ctx.roundRect(zx, zy, zw, zh, 5);
+    ctx.fill();
+
+    // Rahmen der Zone
+    ctx.strokeStyle = z.color + '88';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Zonen-Beschriftung
+    ctx.fillStyle = z.color + 'cc';
+    ctx.font = '9px sans-serif';
+    ctx.fillText(z.label, zx + 5, zy + 13);
+  });
+
+  // ESP32-Nodes als blaue Punkte einzeichnen
+  // Positionen: grob die Ecken + Mitte des Raumes
+  const nodePos = [
+    {x: 0.05, y: 0.05},  // Node 1: oben links
+    {x: 0.95, y: 0.05},  // Node 2: oben rechts
+    {x: 0.50, y: 0.95},  // Node 3: unten mitte
+  ];
+  nodePos.forEach((p, i) => {
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#185FA5';
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 6px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(roomKey[0].toUpperCase() + (i + 1), p.x * W, p.y * H + 2.5);
+    ctx.textAlign = 'left';
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  POSITION AKTUALISIEREN
+//  Wird aufgerufen wenn neue MQTT-Daten ankommen
+// ═══════════════════════════════════════════════════════
+function updatePosition(data) {
+  const roomKey = data.room.toLowerCase();
+  const r = ROOMS[roomKey];
+  if (!r) return;
+
+  // Koordinaten (Meter) → relative Position (0.0 - 1.0)
+  const xRel = Math.min(Math.max(data.x / ROOM_WIDTH_M,  0), 1);
+  const yRel = Math.min(Math.max(data.y / ROOM_HEIGHT_M, 0), 1);
+
+  // Canvas-Größe im Browser ermitteln (kann durch CSS skaliert sein)
+  const canvas = document.getElementById(r.canvasId);
+  const rect   = canvas.getBoundingClientRect();
+
+  // Marker positionieren
+  // Das wrap-div hat position:relative, der Marker position:absolute
+  // left/top = Pixel-Position innerhalb des wrap-divs
+  const marker = document.getElementById(r.markerId);
+  marker.style.display = 'block';
+  marker.style.left = (xRel * rect.width)  + 'px';
+  marker.style.top  = (yRel * rect.height) + 'px';
+
+  // Anderen Raum-Marker verstecken
+  Object.keys(ROOMS).forEach(k => {
+    if (k !== roomKey) {
+      document.getElementById(ROOMS[k].markerId).style.display = 'none';
+      document.getElementById(ROOMS[k].zoneElId).innerHTML =
+        '<span class="zone-dot" style="background:#333"></span><span style="color:#444">Nicht aktiv</span>';
+    }
+  });
+
+  // Zone ermitteln
+  const zone = r.zones.find(z =>
+    xRel >= z.x && xRel <= z.x + z.w &&
+    yRel >= z.y && yRel <= z.y + z.h
+  );
+  const zoneName  = zone ? zone.label  : 'Übergangsbereich';
+  const zoneColor = zone ? zone.color  : '#666';
+
+  // Zone-Label aktualisieren
+  document.getElementById(r.zoneElId).innerHTML =
+    `<span class="zone-dot" style="background:${zoneColor}"></span><span>${zoneName}</span>`;
+
+  // Kennzahlen aktualisieren
+  document.getElementById('st-room').textContent   = data.room;
+  document.getElementById('st-zone').textContent   = zoneName;
+  document.getElementById('st-conf').textContent   = Math.round(data.confidence * 100) + '%';
+  document.getElementById('st-method').textContent = data.method || 'knn';
+
+  // Zeitstempel
+  const now = new Date();
+  document.getElementById('lastUpdate').textContent =
+    'Letztes Update: ' + now.toLocaleTimeString('de-DE');
+}
+
+// ═══════════════════════════════════════════════════════
+//  MQTT VERBINDUNG
+//  Verbindet sich mit Mosquitto über WebSocket (Port 9001)
+// ═══════════════════════════════════════════════════════
+function connectMQTT() {
+  // Client-ID muss eindeutig sein → zufällige ID
+  const clientId = 'openpos-ui-' + Math.random().toString(16).substr(2, 6);
+
+  // Paho MQTT Client erstellen
+  const client = new Paho.MQTT.Client(MQTT_HOST, MQTT_PORT, clientId);
+
+  // Was passiert wenn die Verbindung abbricht
+  client.onConnectionLost = function(resp) {
+    document.getElementById('statusDot').className  = 'status-dot disconnected';
+    document.getElementById('statusText').textContent = 'Verbindung verloren — versuche neu...';
+    // Nach 5 Sekunden erneut verbinden
+    setTimeout(connectMQTT, 5000);
+  };
+
+  // Was passiert wenn eine Nachricht ankommt
+  client.onMessageArrived = function(msg) {
+    try {
+      const data = JSON.parse(msg.payloadString);
+      updatePosition(data);
+    } catch(e) {
+      console.error('MQTT Parse-Fehler:', e);
+    }
+  };
+
+  // Verbindung aufbauen
+  client.connect({
+    onSuccess: function() {
+      document.getElementById('statusDot').className   = 'status-dot connected';
+      document.getElementById('statusText').textContent = 'Verbunden mit MQTT';
+      // Topic abonnieren
+      client.subscribe(MQTT_TOPIC);
+    },
+    onFailure: function(err) {
+      document.getElementById('statusDot').className   = 'status-dot disconnected';
+      document.getElementById('statusText').textContent = 'Verbindung fehlgeschlagen — Retry in 5s';
+      setTimeout(connectMQTT, 5000);
+    },
+    useSSL: false
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  LEGENDE AUFBAUEN
+// ═══════════════════════════════════════════════════════
+function buildLegend() {
+  const el   = document.getElementById('legend');
+  const seen = {};
+  Object.values(ROOMS).forEach(r => {
+    r.zones.forEach(z => {
+      if (!seen[z.id]) {
+        seen[z.id] = true;
+        el.innerHTML +=
+          `<span class="legend-item">
+            <span class="legend-sq" style="background:${z.color}"></span>
+            ${z.label}
+          </span>`;
+      }
+    });
+  });
+  el.innerHTML +=
+    `<span class="legend-item">
+      <span class="legend-sq" style="background:#185FA5; border-radius:50%"></span>
+      ESP32-Node
+    </span>
+    <span class="legend-item">
+      <span class="legend-sq" style="background:#E24B4A; border-radius:50%"></span>
+      Position
+    </span>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════════════
+Object.keys(ROOMS).forEach(drawRoom);
+buildLegend();
+connectMQTT();
+</script>
+</body>
+</html>
