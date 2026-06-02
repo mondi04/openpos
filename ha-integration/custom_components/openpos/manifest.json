@@ -1,0 +1,12 @@
+{
+  "domain": "openpos",
+  "name": "OpenPositioning",
+  "version": "1.0.0",
+  "documentation": "https://github.com/mondi04/openpos",
+  "issue_tracker": "https://github.com/mondi04/openpos/issues",
+  "requirements": [],
+  "dependencies": ["mqtt"],
+  "codeowners": ["@mondi04"],
+  "iot_class": "local_push",
+  "homeassistant": "2024.1.0"
+}
